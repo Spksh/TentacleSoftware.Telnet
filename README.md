@@ -3,6 +3,8 @@ TentacleSoftware.Telnet
 
 A simple task-based event-driven Telnet client that supports SOCKS4 proxies.
 
+Nuget Package: https://www.nuget.org/packages/TentacleSoftware.Telnet/
+
 Step 1. Instantiate a new TelnetClient, passing in destination host and port. Include a throttle timespan to avoid flooding the server.
 
 ```
