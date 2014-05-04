@@ -42,3 +42,11 @@ Step 5. Send something in response.
 ```
 await _telnetClient.Send("magic!");
 ```
+
+For extra bonus points:
+
+To observe errors inside the message reading loop, add a TraceListener:
+
+```
+Trace.Listeners.Add(new ConsoleTraceListener(true));
+```
