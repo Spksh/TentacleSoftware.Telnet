@@ -1,8 +1,10 @@
 ﻿using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -52,7 +54,7 @@ namespace TentacleSoftware.Telnet
                 _tcpReader = new StreamReader(_tcpClient.GetStream());
                 _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
 
-            }, _cancellationToken).ContinueWith(_ => WaitForMessage(), _cancellationToken);
+            }, _cancellationToken).ContinueWith(connect => WaitForMessage(connect), _cancellationToken);
         }
 
         /// <summary>
@@ -118,7 +120,7 @@ namespace TentacleSoftware.Telnet
                 _tcpReader = new StreamReader(_tcpClient.GetStream());
                 _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
 
-            }, _cancellationToken).ContinueWith(_ => WaitForMessage(), _cancellationToken);
+            }, _cancellationToken).ContinueWith(connectWithProxy => WaitForMessage(connectWithProxy), _cancellationToken);
         }
 
         public Task Send(string message)
@@ -161,8 +163,25 @@ namespace TentacleSoftware.Telnet
             return task;
         }
 
-        private Task WaitForMessage()
+        private Task WaitForMessage(Task connected)
         {
+            if (connected.IsFaulted)
+            {
+                if (connected.Exception != null)
+                {
+                    ExceptionDispatchInfo.Capture(connected.Exception.InnerException).Throw();
+                }
+                else
+                {
+                    throw new InvalidOperationException("Antecedent task faulted.");
+                }
+            }
+
+            if (!connected.IsCompleted)
+            {
+                throw new InvalidOperationException("Antecedent task failed to complete.");
+            }
+
             return Task.Run(async () =>
             {
                 while (!_cancellationToken.IsCancellationRequested)
@@ -170,6 +189,7 @@ namespace TentacleSoftware.Telnet
                     if (_tcpReader == null)
                     {
                         // We've probably disconnected and disposed of our reader
+                        // Or our connect task didn't do its job correctly
                         break;
                     }
 
@@ -187,10 +207,9 @@ namespace TentacleSoftware.Telnet
                     }
                     catch (Exception error)
                     {
-                        Console.WriteLine(error);
+                        Trace.WriteLine(error);
                         throw;
                     }
-
                 }
             }, _cancellationToken);
         }
