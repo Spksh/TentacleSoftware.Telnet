@@ -18,7 +18,7 @@ _telnetClient.ConnectionClosed += HandleConnectionClosed;
 _telnetClient.MessageReceived += HandleMessageReceived;
 ```
 
-Step 3. Connect with our without a SOCKS4 proxy
+Step 3. Connect with or without a SOCKS4 proxy
 
 ```
 await _telnetClient.Connect();
