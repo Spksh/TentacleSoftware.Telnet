@@ -10,7 +10,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("TentacleSoftware.Telnet")]
-[assembly: AssemblyCopyright("Copyright ©  2014 Sam Wood")]
+[assembly: AssemblyCopyright("Copyright © 2014 Sam Wood")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
