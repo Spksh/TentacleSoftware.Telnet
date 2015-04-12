@@ -45,13 +45,20 @@ namespace TentacleSoftware.Telnet
         }
 
         /// <summary>
-        /// Connect and wait for incoming messages. When this task completes you are connected.
+        /// Connect and wait for incoming messages. 
+        /// When this task completes you are connected. 
+        /// You cannot call this method twice; if you need to reconnect, dispose of this instance and create a new one.
         /// </summary>
         /// <returns></returns>
         public Task Connect()
         {
             return Task.Run(() =>
             {
+                if (_tcpClient != null)
+                {
+                    throw new InvalidOperationException("Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient.");
+                }
+                
                 _tcpClient = new TcpClient(_host, _port);
                 _tcpReader = new StreamReader(_tcpClient.GetStream());
                 _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
@@ -61,6 +68,8 @@ namespace TentacleSoftware.Telnet
 
         /// <summary>
         /// Connect via SOCKS4 proxy. See http://en.wikipedia.org/wiki/SOCKS#SOCKS4.
+        /// When this task completes you are connected. 
+        /// You cannot call this method twice; if you need to reconnect, dispose of this instance and create a new one.
         /// </summary>
         /// <param name="socks4ProxyHost"></param>
         /// <param name="socks4ProxyPort"></param>
@@ -70,6 +79,11 @@ namespace TentacleSoftware.Telnet
         {
             return Task.Run(async () =>
             {
+                if (_tcpClient != null)
+                {
+                    throw new InvalidOperationException("Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient.");
+                }
+                
                 // Simple implementation of http://en.wikipedia.org/wiki/SOCKS#SOCKS4
                 // Similar to http://biko.codeplex.com/
 
