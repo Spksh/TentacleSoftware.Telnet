@@ -5,12 +5,15 @@
     <TargetFramework>netcoreapp2.0</TargetFramework>
     <ApplicationIcon />
     <StartupObject />
-    <Version>2.0.0-rc1</Version>
+    <Version>2.0.0-rc2</Version>
     <Description>A simple task-based event-driven Telnet client that supports SOCKS4 proxies.</Description>
     <Copyright>Copyright © 2018 Sam Wood</Copyright>
     <Company />
     <Product />
     <Authors />
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <PackageProjectUrl>https://github.com/Spksh/TentacleSoftware.Telnet</PackageProjectUrl>
+    <PackageLicenseUrl>https://github.com/Spksh/TentacleSoftware.Telnet/blob/master/LICENSE.md</PackageLicenseUrl>
+    <RepositoryUrl>https://github.com/Spksh/TentacleSoftware.Telnet</RepositoryUrl>
   </PropertyGroup>
 </Project>
