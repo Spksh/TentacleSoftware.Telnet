@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -50,20 +49,21 @@ namespace TentacleSoftware.Telnet
         /// You cannot call this method twice; if you need to reconnect, dispose of this instance and create a new one.
         /// </summary>
         /// <returns></returns>
-        public Task Connect()
+        public async Task Connect()
         {
-            return Task.Run(() =>
+            if (_tcpClient != null)
             {
-                if (_tcpClient != null)
-                {
-                    throw new InvalidOperationException("Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient.");
-                }
-                
-                _tcpClient = new TcpClient(_host, _port);
-                _tcpReader = new StreamReader(_tcpClient.GetStream());
-                _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
+                throw new NotSupportedException($"{nameof(Connect)} aborted: Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient");
+            }
 
-            }, _internalCancellation.Token).ContinueWith(connect => WaitForMessage(connect), _internalCancellation.Token);
+            _tcpClient = new TcpClient();
+            await _tcpClient.ConnectAsync(_host, _port);
+
+            _tcpReader = new StreamReader(_tcpClient.GetStream());
+            _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
+
+            // Fire-and-forget looping task that waits for messages to arrive
+            WaitForMessage();
         }
 
         /// <summary>
@@ -75,189 +75,180 @@ namespace TentacleSoftware.Telnet
         /// <param name="socks4ProxyPort"></param>
         /// <param name="socks4ProxyUser"></param>
         /// <returns></returns>
-        public Task Connect(string socks4ProxyHost, int socks4ProxyPort, string socks4ProxyUser)
+        public async Task Connect(string socks4ProxyHost, int socks4ProxyPort, string socks4ProxyUser)
         {
-            return Task.Run(async () =>
+            if (_tcpClient != null)
             {
-                if (_tcpClient != null)
-                {
-                    throw new InvalidOperationException("Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient.");
-                }
-                
-                // Simple implementation of http://en.wikipedia.org/wiki/SOCKS#SOCKS4
-                // Similar to http://biko.codeplex.com/
-
-                byte[] hostAddress = Dns.GetHostAddresses(_host).First().GetAddressBytes();
-                byte[] hostPort = new byte[2]; // 16-bit number
-                hostPort[0] = Convert.ToByte(_port / 256);
-                hostPort[1] = Convert.ToByte(_port % 256);
-                byte[] proxyUserId = Encoding.ASCII.GetBytes(socks4ProxyUser ?? string.Empty); // Can't pass in null
-
-                // We build a "please connect me" packet to send to the proxy
-                // Then we wait for an ack
-                // If successful, we can use the TelnetClient directly and traffic will be proxied
-                byte[] proxyRequest = new byte[9 + proxyUserId.Length];
-
-                proxyRequest[0] = 4; // SOCKS4;
-                proxyRequest[1] = 0x01; // Connect (we don't support Bind);
-
-                hostPort.CopyTo(proxyRequest, 2);
-                hostAddress.CopyTo(proxyRequest, 4);
-                proxyUserId.CopyTo(proxyRequest, 8);
-
-                proxyRequest[8 + proxyUserId.Length] = 0x00; // UserId terminator
-
-                // Response
-                // - First byte is null
-                // - Second byte is our result code (we want 0x5a Request granted)
-                // - Last 6 bytes should be ignored
-                byte[] proxyResponse = new byte[8];
-
-                _tcpClient = new TcpClient(socks4ProxyHost, socks4ProxyPort);
-
-                await _tcpClient.GetStream().WriteAsync(proxyRequest, 0, proxyRequest.Length, _internalCancellation.Token);
-                await _tcpClient.GetStream().ReadAsync(proxyResponse, 0, proxyResponse.Length, _internalCancellation.Token);
-
-                if (proxyResponse[1] != 0x5a) // Request granted
-                {
-                    switch (proxyResponse[1])
-                    {
-                        case 0x5b:
-                            throw new InvalidOperationException("Request rejected or failed.");
-                        case 0x5c:
-                            throw new InvalidOperationException("Request failed because client is not running identd (or not reachable from the server).");
-                        case 0x5d:
-                            throw new InvalidOperationException("Request failed because client's identd could not confirm the user ID string in the request.");
-                        default:
-                            throw new InvalidOperationException("Unknown error occured.");
-                    }
-                }
-
-                _tcpReader = new StreamReader(_tcpClient.GetStream());
-                _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
-
-            }, _internalCancellation.Token).ContinueWith(connectWithProxy => WaitForMessage(connectWithProxy), _internalCancellation.Token);
-        }
-
-        public Task Send(string message)
-        {
-            if (message == null)
-            {
-                return Task.FromResult(1);
+                throw new NotSupportedException($"{nameof(Connect)} aborted: Reconnecting is not supported. You must dispose of this instance and instantiate a new TelnetClient");
             }
 
-            Task task = Task.Run(async () =>
+            _tcpClient = new TcpClient();
+            await _tcpClient.ConnectAsync(socks4ProxyHost, socks4ProxyPort);
+
+            // Simple implementation of http://en.wikipedia.org/wiki/SOCKS#SOCKS4
+            // Similar to http://biko.codeplex.com/
+            byte[] hostAddress = Dns.GetHostAddresses(_host).First().GetAddressBytes();
+            byte[] hostPort = new byte[2]; // 16-bit number
+            hostPort[0] = Convert.ToByte(_port / 256);
+            hostPort[1] = Convert.ToByte(_port % 256);
+            byte[] proxyUserId = Encoding.ASCII.GetBytes(socks4ProxyUser ?? string.Empty); // Can't pass in null
+
+            // Request
+            // - We build a "please connect me" packet to send to the proxy
+            byte[] proxyRequest = new byte[9 + proxyUserId.Length];
+
+            proxyRequest[0] = 4; // SOCKS4;
+            proxyRequest[1] = 0x01; // Connect (we don't support Bind);
+
+            hostPort.CopyTo(proxyRequest, 2);
+            hostAddress.CopyTo(proxyRequest, 4);
+            proxyUserId.CopyTo(proxyRequest, 8);
+
+            proxyRequest[8 + proxyUserId.Length] = 0x00; // UserId terminator
+
+            // Send proxy request
+            // - Then we wait for an ack
+            // - If successful, we can use the TelnetClient directly and traffic will be proxied
+            await _tcpClient.GetStream().WriteAsync(proxyRequest, 0, proxyRequest.Length, _internalCancellation.Token);
+
+            // Response
+            // - First byte is null
+            // - Second byte is our result code (we want 0x5a Request granted)
+            // - Last 6 bytes should be ignored
+            byte[] proxyResponse = new byte[8];
+
+            // Wait for proxy response
+            await _tcpClient.GetStream().ReadAsync(proxyResponse, 0, proxyResponse.Length, _internalCancellation.Token);
+
+            if (proxyResponse[1] != 0x5a) // Request granted
+            {
+                switch (proxyResponse[1])
+                {
+                    case 0x5b:
+                        throw new InvalidOperationException("Proxy connect request rejected or failed");
+                    case 0x5c:
+                        throw new InvalidOperationException("Proxy connect request failed because client is not running identd (or not reachable from the server)");
+                    case 0x5d:
+                        throw new InvalidOperationException("Proxy connect request failed because client's identd could not confirm the user ID string in the request");
+                    default:
+                        throw new InvalidOperationException("Proxy connect request failed, unknown error occured");
+                }
+            }
+
+            _tcpReader = new StreamReader(_tcpClient.GetStream());
+            _tcpWriter = new StreamWriter(_tcpClient.GetStream()) { AutoFlush = true };
+
+            // Fire-and-forget looping task that waits for messages to arrive
+            WaitForMessage();
+        }
+
+        public async Task Send(string message)
+        {
+            try
             {
                 // Wait for any previous send commands to finish and release the semaphore
                 // This throttles our commands
                 await _sendRateLimit.WaitAsync(_internalCancellation.Token);
 
-                if (_internalCancellation.Token.IsCancellationRequested)
-                {
-                    // Don't bother sending
-                    return;
-                }
+                // Send command + params
+                await _tcpWriter.WriteLineAsync(message);
 
-                try
-                {
-                    await _tcpWriter.WriteLineAsync(message);
-                }
-                catch (ObjectDisposedException)
-                {
-                    // This happens during ReadLineAsync() when we call Disconnect() and close the underlying stream
-                    // This is an expected exception during disconnection if we're in the middle of a send
-                    Trace.TraceInformation("Send failed: TcpWriter or TcpWriter.BaseStream disposed. This is expected after calling Disconnect().");
-                }
-                catch (IOException error)
-                {
-                    // This happens when we start WriteLineAsync() if the socket is disconnected unexpectedly
-                    Trace.TraceError("Send failed: {0}", error);
-                    throw;
-                }
-                catch (Exception error)
-                {
-                    Trace.TraceError("Send failed: {0}", error);
-                    throw;
-                }
-
-            }, _internalCancellation.Token);
-
-            // Flood protection
-            task.ContinueWith(async send =>
+                // Block other commands until our timeout to prevent flooding
+                await Task.Delay(_sendRate, _internalCancellation.Token);
+            }
+            catch (OperationCanceledException)
             {
-                if (!send.IsCanceled && !send.IsFaulted && !_internalCancellation.Token.IsCancellationRequested)
-                {
-                    // Wait some time to prevent flooding
-                    await Task.Delay(_sendRate, _internalCancellation.Token);
-                }
-
-                // Exit our lock
+                // We're waiting to release our semaphore, and someone cancelled the task on us (I'm looking at you, WaitForMessages...)
+                // This happens if we've just sent something and then disconnect immediately
+                Trace.TraceInformation($"{nameof(Send)} aborted: {nameof(_internalCancellation.IsCancellationRequested)} == true");
+            }
+            catch (ObjectDisposedException)
+            {
+                // This happens during ReadLineAsync() when we call Disconnect() and close the underlying stream
+                // This is an expected exception during disconnection if we're in the middle of a send
+                Trace.TraceInformation($"{nameof(Send)} failed: {nameof(_tcpWriter)} or {nameof(_tcpWriter.BaseStream)} disposed");
+            }
+            catch (IOException)
+            {
+                // This happens when we start WriteLineAsync() if the socket is disconnected unexpectedly
+                Trace.TraceError($"{nameof(Send)} failed: Socket disconnected unexpectedly");
+                throw;
+            }
+            catch (Exception error)
+            {
+                Trace.TraceError($"{nameof(Send)} failed: {error}");
+                throw;
+            }
+            finally
+            {
+                // Exit our semaphore
                 _sendRateLimit.Release();
-
-            }, _internalCancellation.Token);
-
-            return task;
+            }
         }
 
-        private Task WaitForMessage(Task connected)
+        private async Task WaitForMessage()
         {
-            if (connected.IsFaulted)
+            try
             {
-                if (connected.Exception != null)
+                while (true)
                 {
-                    ExceptionDispatchInfo.Capture(connected.Exception.InnerException).Throw();
-                }
-                else
-                {
-                    throw new InvalidOperationException("Connect task faulted. Aborting.");
-                }
-            }
+                    if (_internalCancellation.IsCancellationRequested)
+                    {
+                        Trace.TraceInformation($"{nameof(WaitForMessage)} aborted: {nameof(_internalCancellation.IsCancellationRequested)} == true");
+                        break;
+                    }
 
-            if (!connected.IsCompleted)
-            {
-                throw new InvalidOperationException("Connect task failed to complete. Aborting.");
-            }
+                    string message;
 
-            return Task.Run(async () =>
-            {
-                while (!_internalCancellation.Token.IsCancellationRequested)
-                {
                     try
                     {
-                        string message = await _tcpReader.ReadLineAsync();
-
-                        if (message == null)
+                        if (!_tcpClient.Connected)
                         {
-                            // This happens if the server closes the connection and we haven't noticed yet
-                            Trace.TraceInformation("WaitForMessage aborted: Connection closed by the server.");
-
-                            // Bail out
-                            Disconnect();
-
+                            Trace.TraceInformation($"{nameof(WaitForMessage)} aborted: {nameof(_tcpClient)} is not connected");
                             break;
                         }
 
-                        OnMessageReceived(message);
+                        // Due to CR/LF platform differences, we sometimes get empty messages if the server sends us over-eager EOL markers
+                        // Because ReadLine*() strips out the EOL characters, the message can end up empty (but not null!)
+                        // I *think* this is a server implementation problem rather than our problem to solve
+                        // So just handle empty messages in your consumer library
+                        message = await _tcpReader.ReadLineAsync();
+
+                        if (message == null)
+                        {
+                            Trace.TraceInformation($"{nameof(WaitForMessage)} aborted: {nameof(_tcpReader)} reached end of stream");
+                            break;
+                        }
                     }
                     catch (ObjectDisposedException)
                     {
                         // This happens during ReadLineAsync() when we call Disconnect() and close the underlying stream
                         // This is an expected exception during disconnection
-                        Trace.TraceInformation("WaitForMessage aborted: TcpReader or TcpReader.BaseStream disposed. This is expected after calling Disconnect().");
+                        Trace.TraceInformation($"{nameof(WaitForMessage)} aborted: {nameof(_tcpReader)} or {nameof(_tcpReader.BaseStream)} disposed. This is expected after calling Disconnect()");
+                        break;
                     }
-                    catch (IOException error)
+                    catch (IOException)
                     {
                         // This happens when we start ReadLineAsync() if the socket is disconnected unexpectedly
-                        Trace.TraceError("WaitForMessage aborted: {0}", error);
-                        throw;
+                        Trace.TraceError($"{nameof(WaitForMessage)} aborted: Socket disconnected unexpectedly");
+                        break;
                     }
                     catch (Exception error)
                     {
-                        Trace.TraceError("WaitForMessage aborted: {0}", error);
-                        throw;
+                        Trace.TraceError($"{nameof(WaitForMessage)} aborted: {error}");
+                        break;
                     }
+
+                    Trace.TraceInformation($"{nameof(WaitForMessage)} received: {message} [{message.Length}]");
+
+                    OnMessageReceived(message);
                 }
-            }, _internalCancellation.Token);
+            }
+            finally
+            {
+                Trace.TraceInformation($"{nameof(WaitForMessage)} completed: Calling {nameof(Disconnect)}");
+                Disconnect();
+            }
         }
 
         /// <summary>
@@ -267,36 +258,23 @@ namespace TentacleSoftware.Telnet
         {
             try
             {
+                // Blow up any outstanding tasks
                 _internalCancellation.Cancel();
 
                 // Both reader and writer use the TcpClient.GetStream(), and closing them will close the underlying stream
                 // So closing the stream for TcpClient is redundant
                 // But it means we're triple sure!
-                if (_tcpClient != null)
-                {
-                    if (_tcpClient.Connected)
-                    {
-                        _tcpClient.GetStream().Close();
-                    }
-
-                    _tcpClient.Close();
-                }
-
-                if (_tcpReader != null)
-                {
-                    _tcpReader.Close();
-                }
-
-                if (_tcpWriter != null)
-                {
-                    _tcpWriter.Close();
-                }
-
-                OnConnectionClosed();
+                _tcpReader?.Close();
+                _tcpWriter?.Close();
+                _tcpClient?.Close();
             }
             catch (Exception error)
             {
-                Trace.TraceError("Disconnect error: {0}", error);
+                Trace.TraceError($"{nameof(Disconnect)} error: {error}");
+            }
+            finally
+            {
+                OnConnectionClosed();
             }
         }
 
@@ -321,6 +299,7 @@ namespace TentacleSoftware.Telnet
         }
 
         private bool _disposed = false;
+        
 
         public void Dispose()
         {
