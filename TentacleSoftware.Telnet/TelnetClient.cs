@@ -87,7 +87,7 @@ namespace TentacleSoftware.Telnet
 
             // Simple implementation of http://en.wikipedia.org/wiki/SOCKS#SOCKS4
             // Similar to http://biko.codeplex.com/
-            byte[] hostAddress = Dns.GetHostAddresses(_host).First(addr => addr.GetAddressBytes().Length == 4).GetAddressBytes();
+            byte[] hostAddress = Dns.GetHostAddresses(_host).First(a => a.AddressFamily == AddressFamily.InterNetwork).GetAddressBytes();
             byte[] hostPort = new byte[2]; // 16-bit number
             hostPort[0] = Convert.ToByte(_port / 256);
             hostPort[1] = Convert.ToByte(_port % 256);
